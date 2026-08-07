@@ -47,10 +47,10 @@ def get_track_from_api(query_text, search_type="track", page=0, size=5):
 
     df = db_to_pandas()
     result = df.loc[df["track_name"] == query_text].drop(columns=['track_id','artists','album_name'])
-
+    #result = pd.DataFrame()  # Placeholder for database query result
     # 2. Check if the result contains any rows
     if not result.empty:
-        return result.iloc[0]  # Exits the function immediately if found
+        return result.iloc[[0]].drop(columns=['track_name', 'popularity', 'duration_ms', 'explicit', 'time_signature', 'track_genre']).sort_index(axis=1) 
 
     try:
         response = requests.get(url, headers=headers, params=params)
@@ -63,10 +63,11 @@ def get_track_from_api(query_text, search_type="track", page=0, size=5):
             
         if response.status_code == 200:
             response = response.json()
+            print(response["content"][0]["artists"])
             id = response["content"][0]["id"]
             audio_features = get_audio_features(id)
-            df = pd.DataFrame([audio_features])
-            return df
+            df = pd.DataFrame([audio_features]).drop(columns=['id', 'href', 'isrc'])
+            return df.sort_index(axis=1)  # Sort columns alphabetically for consistency
         else:
             print(f"Failed to fetch data (Status {response.status_code}): {response.text}")
             return None
@@ -111,6 +112,13 @@ def main():
     track_features = get_track_from_api("Bad Liar", search_type="track")
     print(track_features)
 
+#API columns: ['id', 'href', 'isrc', 'acousticness', 'danceability', 'energy',
+#       'instrumentalness', 'key', 'liveness', 'loudness', 'mode',
+#       'speechiness', 'tempo', 'valence']
+#Database Columns: track_name', 'popularity', 'duration_ms', 'explicit',
+#       'danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness',
+#       'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo',
+#       'time_signature', 'track_genre']
 
 if __name__ == "__main__":
     main()
