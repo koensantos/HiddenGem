@@ -23,6 +23,56 @@ def db_to_pandas():
     # View the data
     return df
 
+def get_monthly_listeners(artist_name):
+    url = "https://api.reccobeats.com/v1/artist/search"
+    
+    params = {
+        "searchText": artist_name.strip(),
+        "page": 0,
+        "size": 1
+    }
+
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+
+        if 'application/json' not in response.headers.get('Content-Type', ''):
+            print(f"Error: Server returned unexpected '{response.headers.get('Content-Type')}' layout.")
+            return None
+
+        if response.status_code == 200:
+            print(response.json())
+            artist_url = response.json()["content"][0]["href"]
+            artist_id = artist_url.replace("https://open.spotify.com/artist/", "") #Extract artist ID from Spotify URL
+            monthy_listeners = monthly_listeners_func(artist_id) #Get monthly listeners from Spotify API
+
+            return monthy_listeners
+        else:
+            print(f"Failed to fetch audio features (Status {response.status_code}): {response.text}")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Network connection failure: {e}")
+        return None
+
+#def add_monthly_listeners_column():
+    conn = sqlite3.connect("song_dataset.db")
+    df = pd.read_sql_query("SELECT * FROM songs", conn)
+
+    for row in df.itertuples():
+        artist_name = row.artists
+        print(artist_name)
+        monthly_listeners = get_monthly_listeners(artist_name)
+        if monthly_listeners is not None:
+            df.at[row.Index, 'monthly_listeners'] = monthly_listeners
+
+    # Save the updated DataFrame back to the database
+    df.to_sql("songs", conn, if_exists="replace", index=False)
+    conn.close()
 
 def get_track_from_api(query_text, search_type="track", page=0, size=5):
     # Dynamically select endpoint based on your design intentions
@@ -60,7 +110,7 @@ def get_track_from_api(query_text, search_type="track", page=0, size=5):
                 reponse = response.json()
                 spotify_href = reponse["content"][0]["href"]
                 result['spotify_href'] = spotify_href
-                return result.iloc[[0]].drop(columns=['track_name', 'popularity', 'duration_ms', 'explicit', 'time_signature', 'track_genre']).sort_index(axis=1)
+                return result.iloc[[0]].drop(columns=['track_name', 'popularity', 'duration_ms', 'explicit', 'time_signature', 'track_genre', 'artists', 'spotify_href']).sort_index(axis=1)
             else:
                 print(f"Failed to fetch data (Status {response.status_code}): {response.text}")
                 return None
@@ -124,44 +174,10 @@ def get_audio_features(id):
         print(f"Network connection failure: {e}")
         return None
 
-def get_monthly_listeners(artist_name):
-    url = "https://api.reccobeats.com/v1/artist/search"
-    
-    params = {
-        "searchText": artist_name.strip(),
-        "page": 0,
-        "size": 1
-    }
 
-    headers = {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-
-    try:
-        response = requests.get(url, headers=headers, params=params)
-
-        if 'application/json' not in response.headers.get('Content-Type', ''):
-            print(f"Error: Server returned unexpected '{response.headers.get('Content-Type')}' layout.")
-            return None
-
-        if response.status_code == 200:
-            artist_url = response.json()["content"][0]["href"]
-            artist_id = artist_url.replace("https://open.spotify.com/artist/", "") #Extract artist ID from Spotify URL
-            monthy_listeners = monthly_listeners_func(artist_id) #Get monthly listeners from Spotify API
-
-            return monthy_listeners
-        else:
-            print(f"Failed to fetch audio features (Status {response.status_code}): {response.text}")
-            return None
-
-    except requests.exceptions.RequestException as e:
-        print(f"Network connection failure: {e}")
-        return None
 
 def main():
-    print(get_track_from_api("All I Do Is Win"))
-
+    add_monthly_listeners_column()
 #API columns: ['id', 'href', 'isrc', 'acousticness', 'danceability', 'energy',
 #       'instrumentalness', 'key', 'liveness', 'loudness', 'mode',
 #       'speechiness', 'tempo', 'valence']

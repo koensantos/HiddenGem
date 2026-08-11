@@ -5,34 +5,55 @@ import requests
 def monthly_listeners_func(artist_id: str) -> int:
     url = f"https://open.spotify.com/artist/{artist_id}"
 
-    response = requests.get(url, timeout=10)
-
-    if response.status_code != 200:
-        raise Exception(
-            f"Spotify returned status code {response.status_code}"
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            },
+            timeout=10
         )
 
-    html = response.text
+        response.raise_for_status()
 
-    match = re.search(
-        r"Artist · ([0-9.,]+)([KMB]) monthly listeners",
-        html
-    )
+        html = response.text
 
-    if not match:
-        raise Exception("Monthly listeners not found")
+        # Handles:
+        # Artist · 114,600,000 monthly listeners
+        # Artist · 114.6M monthly listeners
+        # Artist · 114.6 million monthly listeners
 
-    number = match.group(1).replace(",", "")
-    suffix = match.group(2)
+        match = re.search(
+            r"Artist\s*·\s*([0-9.,]+)\s*([KMB])?\s*(?:monthly listeners)",
+            html,
+            re.IGNORECASE
+        )
 
-    value = float(number)
+        if not match:
+            raise Exception("Monthly listeners not found")
 
-    if suffix == "K":
-        value *= 1_000
-    elif suffix == "M":
-        value *= 1_000_000
-    elif suffix == "B":
-        value *= 1_000_000_000
+        number = match.group(1).replace(",", "")
+        suffix = match.group(2)
 
-    return int(value)
+        value = float(number)
+
+        if suffix:
+            suffix = suffix.upper()
+
+            if suffix == "K":
+                value *= 1_000
+            elif suffix == "M":
+                value *= 1_000_000
+            elif suffix == "B":
+                value *= 1_000_000_000
+
+        return int(value)
+
+    except requests.exceptions.RequestException as e:
+        print(f"Spotify request failed for {artist_id}: {e}")
+        return None
+
+    except Exception as e:
+        print(f"Could not get monthly listeners for {artist_id}: {e}")
+        return None
 
