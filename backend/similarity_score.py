@@ -1,14 +1,13 @@
 from song_retrieval import get_track_from_api, db_to_pandas
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
-import pandas as pd
 import sqlite3
-
+import pandas as pd
 
 def add_monthly_listeners_column(df):
     df = df.copy()
 
-    # Get the first artist from each song
+    # Extract the primary artist from each song
     df["primary_artist"] = (
         df["artists"]
         .str.split(";")
@@ -16,7 +15,7 @@ def add_monthly_listeners_column(df):
         .str.strip()
     )
 
-    # Load artist data from SQLite
+    # Load artist listener data
     conn = sqlite3.connect("artist.db")
 
     artist_df = pd.read_sql_query(
@@ -26,25 +25,23 @@ def add_monthly_listeners_column(df):
 
     conn.close()
 
-    # Clean artist names
+    # Clean and deduplicate artist records
     artist_df["artists"] = (
         artist_df["artists"]
         .str.strip()
     )
 
-    # Keep only one row per artist
     artist_df = artist_df.drop_duplicates(
         subset=["artists"]
     )
 
-    # Rename artist column for the merge
     artist_df = artist_df.rename(
         columns={
             "artists": "artist_name"
         }
     )
 
-    # Match each song to its primary artist
+    # Attach monthly listeners to each song
     df = df.merge(
         artist_df,
         how="left",
@@ -52,128 +49,118 @@ def add_monthly_listeners_column(df):
         right_on="artist_name"
     )
 
-    # Remove temporary columns
-    df = df.drop(
-        columns=[
-            "primary_artist",
-            "artist_name"
-        ]
+    return df.drop(
+        columns=["primary_artist", "artist_name"]
     )
-
-    return df
 
 
 def calculate_similarity_score(
     song_1,
-    min_monthly_listeners=10000,
-    max_monthly_listeners=100000
+    min_monthly_listeners,
+    max_monthly_listeners,
+    genre
 ):
+    if min_monthly_listeners >= max_monthly_listeners:
+        print("The minimum listeners are greater than the max listeners. Please update your range.")
+        return None
 
-    # Get audio features for the user's song
+    print("\n" + "=" * 60)
+    print("HIDDENGEM RECOMMENDATION ENGINE")
+    print("=" * 60)
+
+    print(f"\nInput song: {song_1}")
+    print(
+        f"Hidden Gem range: "
+        f"{min_monthly_listeners:,} - "
+        f"{max_monthly_listeners:,} monthly listeners"
+    )
+
+    # Retrieve audio features for the input song
     song_features = get_track_from_api(song_1)
 
     if song_features is None:
-        print("Error: Could not retrieve song features.")
+        print("\nError: Could not retrieve song features.")
         return None
 
-    print("\nSong feature columns:")
-    print(song_features.columns.tolist())
-
-    # Load song database
+    # Load the song database
     df = db_to_pandas()
 
     if df.empty:
-        print("Error: Database is empty.")
+        print("\nError: Song database is empty.")
         return None
 
-    print("\nOriginal database size:")
-    print(len(df))
+    original_size = len(df)
 
-    # Add monthly listeners
+    # Add artist popularity data
     df = add_monthly_listeners_column(df)
 
-    # Convert listener values to numeric
+    # Clean listener data
     df["monthly_listeners"] = pd.to_numeric(
         df["monthly_listeners"],
         errors="coerce"
     )
 
-    # Remove missing listener values
     df = df.dropna(
         subset=["monthly_listeners"]
     )
 
-    # Remove invalid zero/negative listener values
     df = df[
         df["monthly_listeners"] > 0
     ]
 
-    # Apply monthly listener range
+    # Filter songs based on the user's Hidden Gem range
     df = df[
         (df["monthly_listeners"] >= min_monthly_listeners) &
         (df["monthly_listeners"] <= max_monthly_listeners)
     ]
 
-    # Remove duplicate songs
+    if genre is not None:
+        df = df[
+            df["track_genre"].str.lower() == genre.lower()
+        ]
+    else:
+        print("This genre does not exist. Please try again.")
+        return None
+
+    # Treat the same song/artist combination as one recommendation
     df = df.drop_duplicates(
         subset=["track_name", "artists"],
         keep="first"
     )
 
-    print("\nDuplicate track names/artists:")
-    print(
-        df[
-            df.duplicated(
-                subset=["track_name", "artists"],
-                keep=False
-            )
-        ][
-            [
-                "track_id",
-                "track_name",
-                "artists",
-                "monthly_listeners"
-            ]
-        ].sort_values(
-            by=["track_name", "artists"]
-        ).head(20).to_string(index=False)
-    )
-
-    print(
-        f"\nSongs between "
-        f"{min_monthly_listeners:,} and "
-        f"{max_monthly_listeners:,} monthly listeners:"
-    )
-    print(len(df))
-
     if df.empty:
-        print(
-            "No songs found within the selected "
-            "monthly listener range."
-        )
+        print("\nNo songs found within the selected listener range.")
         return None
 
-    # Select audio features
-    feature_df = df.drop(columns=[
-        "Unnamed: 0",
-        "track_id",
-        "artists",
-        "album_name",
-        "track_name",
-        "popularity",
-        "duration_ms",
-        "explicit",
-        "time_signature",
-        "track_genre",
-        "monthly_listeners"
-    ]).sort_index(axis=1)
+    print("\nCandidate filtering")
+    print("-" * 60)
+    print(f"Songs in database:       {original_size:,}")
+    print(f"Eligible recommendations: {len(df):,}")
 
-    # Match API feature order to database feature order
-    song_features = song_features[
-        feature_df.columns
+    # Select only audio features used for similarity
+    feature_columns = [
+        "acousticness",
+        "danceability",
+        "energy",
+        "instrumentalness",
+        "key",
+        "liveness",
+        "loudness",
+        "mode",
+        "speechiness",
+        "tempo",
+        "valence"
     ]
 
-    # Standardize audio features
+    feature_df = df[
+        feature_columns
+    ]
+
+    song_features = song_features[
+        feature_columns
+    ]
+
+    # Standardize features so large-scale features do not dominate
     scaler = StandardScaler()
 
     scaled_features = scaler.fit_transform(
@@ -184,46 +171,42 @@ def calculate_similarity_score(
         song_features
     )
 
-    # Calculate cosine similarity
-    df["cosine_similarity"] = cosine_similarity(
+    # Calculate similarity between input song and candidates
+    similarities = cosine_similarity(
         scaled_features,
         scaled_song_features
     ).flatten()
 
-    # Rank by similarity
-    df = df.sort_values(
-        by="cosine_similarity",
-        ascending=False
+    df["cosine_similarity"] = similarities
+
+    # Rank candidates by similarity
+    recommendations = (
+        df.sort_values(
+            by="cosine_similarity",
+            ascending=False
+        )
+        .head(5)
     )
 
-    # Display top 20 results
-    print("\nTop 20 results:")
+    if len(recommendations) < 5:
+        print("There are less than 5 songs present. For better recommendations, please change the listener range or the genre.")
+        return None
+
+    print("\nTop Hidden Gem Recommendations")
+    print("-" * 60)
 
     print(
-        df[
+        recommendations[
             [
                 "track_name",
                 "artists",
                 "monthly_listeners",
                 "cosine_similarity"
             ]
-        ]
-        .head(20)
-        .to_string(index=False)
+        ].to_string(index=False)
     )
 
-    # Return top 5 recommendations
-    return df[
-        [
-            "track_name",
-            "artists",
-            "monthly_listeners",
-            "cosine_similarity"
-        ]
-    ].head(5)
+    print("\n" + "=" * 60)
 
-print(calculate_similarity_score(
-    song_1="Shape of You",
-    min_monthly_listeners=10000,
-    max_monthly_listeners=100000
-))
+    recommendations_json = recommendations.to_json(orient="records")
+    return recommendations_json
