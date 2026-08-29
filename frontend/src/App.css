@@ -1,0 +1,70 @@
+.app-shell {
+  min-height: 100vh;
+  padding: 48px 20px;
+  background: #f1efe8;
+  color: #20231f;
+}
+
+.panel {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px;
+  background: #fffdf8;
+  border: 1px solid #d8d5ca;
+  box-shadow: 8px 8px 0 #c9d8c0;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: #59744d;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1, h2 { margin-top: 0; }
+h1 { margin-bottom: 12px; font-size: 2.5rem; }
+.intro { margin-bottom: 32px; color: #5f625b; }
+
+form { display: grid; gap: 20px; }
+label { display: grid; gap: 8px; font-size: 0.9rem; font-weight: 700; }
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #aaa99f;
+  border-radius: 2px;
+  background: #fff;
+  font: inherit;
+}
+.range-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+button {
+  width: fit-content;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 2px;
+  background: #345a3d;
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+button:disabled { cursor: wait; opacity: 0.6; }
+.error { color: #a2352d; font-weight: 700; }
+.response { margin-top: 36px; }
+.response h2 { font-size: 1rem; }
+pre {
+  overflow-x: auto;
+  padding: 18px;
+  background: #20231f;
+  color: #e7efd9;
+  font: 0.85rem/1.5 Consolas, monospace;
+}
+
+@media (max-width: 600px) {
+  .app-shell { padding: 24px 12px; }
+  .panel { padding: 24px; }
+  h1 { font-size: 2rem; }
+  .range-fields { grid-template-columns: 1fr; }
+}
