@@ -51,16 +51,15 @@ describe('App', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          song_name: 'Midnight City',
+          song: 'Midnight City',
           min_monthly_listeners: 25000,
           max_monthly_listeners: 2000000,
         }),
       })
     );
 
-    expect(await screen.findByText(/raw json response/i)).toBeInTheDocument();
-    expect(screen.getByText(/"recommendations"/i)).toBeInTheDocument();
-    expect(screen.getByText(/"count"/i)).toBeInTheDocument();
+    expect(await screen.findByText('Midnight City')).toBeInTheDocument();
+    expect(screen.getByText('M83')).toBeInTheDocument();
   });
 
   test('shows an error message when the recommendations request fails', async () => {
@@ -75,7 +74,24 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /get recommendations/i }));
 
     expect(await screen.findByText('No recommendations found for that range.')).toBeInTheDocument();
-    expect(screen.queryByText(/raw json response/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Midnight City')).not.toBeInTheDocument();
+  });
+
+  test('shows a validation error without sending an invalid listener range', async () => {
+    const mockFetch = jest.spyOn(global, 'fetch');
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(screen.getByLabelText(/minimum monthly listeners/i));
+    await user.type(screen.getByLabelText(/minimum monthly listeners/i), '5000000');
+    await user.clear(screen.getByLabelText(/maximum monthly listeners/i));
+    await user.type(screen.getByLabelText(/maximum monthly listeners/i), '1000');
+    await user.click(screen.getByRole('button', { name: /get recommendations/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Minimum monthly listeners must not exceed the maximum.'
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   test('shows a loading state while the recommendations request is pending', async () => {
@@ -93,6 +109,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /get recommendations/i }));
 
     expect(screen.getByRole('button', { name: /loading.../i })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading recommendations...');
 
     resolveFetch({
       ok: true,

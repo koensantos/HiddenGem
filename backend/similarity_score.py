@@ -69,11 +69,11 @@ def filter_candidates(df, min_monthly_listeners, max_monthly_listeners, genre):
     return df.drop_duplicates(subset=["track_name", "artists"], keep="first")
 
 
-def calculate_similarity_score(song_1, min_monthly_listeners, max_monthly_listeners, genre):
+def calculate_similarity_score(input_song, min_monthly_listeners, max_monthly_listeners, genre):
     if min_monthly_listeners > max_monthly_listeners:
         raise ValueError("min_monthly_listeners must not exceed max_monthly_listeners.")
 
-    song_features = get_track_from_api(song_1)
+    song_features = get_track_from_api(input_song)
     if song_features is None:
         raise ValueError("Song was not found or its audio features could not be retrieved.")
 
@@ -95,7 +95,15 @@ def calculate_similarity_score(song_1, min_monthly_listeners, max_monthly_listen
         scaled_features, scaled_song_features
     ).flatten()
 
-    recommendations = candidates.nlargest(
-        RECOMMENDATION_LIMIT, "cosine_similarity"
+    top_recommendations = candidates.nlargest(
+        RECOMMENDATION_LIMIT * 3, "cosine_similarity"  # Get more to filter by artist
+    ).copy()
+
+    top_recommendations["primary_artist"] = top_recommendations["artists"].str.split(";").str[0].str.strip()
+
+    unique_artist_recommendations = top_recommendations.drop_duplicates(
+        subset=["primary_artist"], keep="first"
     )
+
+    recommendations = unique_artist_recommendations.head(RECOMMENDATION_LIMIT)
     return recommendations[RESPONSE_COLUMNS].to_dict(orient="records")

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap/dist/js/bootstrap.bundle.min.js';
+import './App.css';
 
 function App() {
   const [rawData, setRawData] = useState(null);
@@ -14,23 +15,60 @@ function App() {
     event.preventDefault();
     setError(null);
     setRawData(null);
+
+    const minimumListeners = Number(minMonthlyListeners);
+    const maximumListeners = Number(maxMonthlyListeners);
+    if (!Number.isFinite(minimumListeners) || !Number.isFinite(maximumListeners)) {
+      setError('Listener counts must be valid numbers.');
+      return;
+    }
+    if (minimumListeners > maximumListeners) {
+      setError('Minimum monthly listeners must not exceed the maximum.');
+      return;
+    }
+
     setIsLoading(true);
 
-    // Keep the payload aligned with validate_recommendation_request in the Flask API.
     try {
-      const response = await fetch('/recommendations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        song_name: song,
-        min_monthly_listeners: Number(minMonthlyListeners),
-        max_monthly_listeners: Number(maxMonthlyListeners),
-      }),
-    });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      let response;
+      try {
+        response = await fetch('/recommendations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            song,
+            min_monthly_listeners: minimumListeners,
+            max_monthly_listeners: maximumListeners,
+          }),
+          signal: controller.signal
+        });
+      } catch (networkError) {
+        clearTimeout(timeoutId);
+        if (networkError.name === 'AbortError') {
+          throw new Error('Backend request timed out after 10 seconds. Is the backend running?');
+        }
+        throw new Error(`Cannot reach backend: ${networkError.message}`);
+      }
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let errorMessage = 'Request failed.';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || `Backend error: ${response.status}`;
+        } catch {
+          errorMessage = `Backend error: ${response.status}`;
+        }
+        throw new Error(errorMessage);
+      }
+
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Request failed.');
       if (typeof data == 'undefined'){
         throw new Error("Data not initialized.")
       }
@@ -50,13 +88,18 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="panel">
-        <p className="eyebrow">Hidden Gem</p>
-        <h1>Find songs by reach</h1>
-        <p className="intro">Enter a song and listener range to get recommendations from the API.</p>
+        <header className="text-center intro-header">
+          <h1>HiddenGem</h1>
+          <h2>Find your niche music</h2>
+          <p className="intro">Enter a song and listener range to get recommendations from the API.</p>
+        </header>
 
-        <div className="d-flex justify-content-center align-items-center min-vh-100">
-          <form onSubmit={handleSubmit} className='w-100' style={{ maxWidth: '400px' }}>
+
+
+        <div className="d-flex justify-content-center align-items-center min-vh-10">
+          <form onSubmit={handleSubmit} className='w-100' style={{ maxWidth: '400px' }} aria-busy={isLoading}>
+            {error && <p className="error" role="alert">{error}</p>}
+
             <label className="mb-3 d-flex flex-column">
               Song
               <input value={song} onChange={(event) => setSong(event.target.value)} required minLength={3} />
@@ -74,32 +117,70 @@ function App() {
             <button type="submit" disabled={isLoading}>
               {isLoading ? 'Loading...' : 'Get recommendations'}
             </button>
+            {isLoading && <p className="status" role="status" aria-live="polite">Loading recommendations...</p>}
           </form>
         </div>
 
-        {error && <p className="error">{error}</p>}
         {/* Keep this unfiltered so new fields added by the API are visible automatically. */}
-        <div className="row g-4 mb-5">
+        <div className="row g-4 mb-5 min-vh-10 pt-4">
           {Array.isArray(rawData) ? (
-            rawData.map((item, index) => (
-              /* Cards take up 12 cols on mobile, 6 on tablet, 4 on desktop */
-              <div className="col-12 col-md-6 col-lg-4" key={item.id || index}>
-                <div className="card h-100 shadow-sm border-start border-4 border-primary">
-                  <div className="card-body">
-                    {Object.entries(item).map(([key, value]) => (
-                      <div className="mb-3" key={key}>
-                        <small className="text-muted fw-bold text-uppercase d-block mb-1">
-                          {key.replace(/([A-Z])/g, ' $1')}
-                        </small>
-                        <p className="card-text text-dark word-break">
-                          {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                        </p>
+            rawData.length > 0 ? (
+              rawData.map((item, index) => {
+                // Safety check: ensure item is a valid object
+                if (!item || typeof item !== 'object') {
+                  return null;
+                }
+                return (
+                  /* Cards take up 12 cols on mobile, 6 on tablet, 4 on desktop */
+                  <div className="col-12 col-md-6 col-lg-4" key={`${item.track_name || ''}-${index}`}>
+                    <div className="card h-100 shadow-sm border-start border-4 border-primary">
+                      <div className="card-body">
+                        {Object.entries(item).map(([key, value]) => {
+                          // Format values based on field type
+                          let displayValue = value;
+                          if (key === 'monthly_listeners' && typeof value === 'number') {
+                            displayValue = value.toLocaleString();
+                          } else if (key === 'cosine_similarity' && typeof value === 'number') {
+                            displayValue = value.toFixed(4);
+                          } else if (typeof value === 'object') {
+                            displayValue = JSON.stringify(value);
+                          } else {
+                            displayValue = String(value);
+                          }
+
+                          // Format key: convert snake_case and camelCase to Title Case
+                          const formattedKey = key
+                            .replace(/_/g, ' ')
+                            .replace(/([A-Z])/g, ' $1')
+                            .trim()
+                            .split(' ')
+                            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                            .join(' ');
+
+                          return (
+                            <div className="mb-3" key={key}>
+                              <small className="text-muted fw-bold text-uppercase d-block mb-1">
+                                {formattedKey}
+                              </small>
+                              <p className="card-text text-dark word-break">
+                                {displayValue}
+                              </p>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    </div>
                   </div>
+                );
+              })
+            ) : (
+              /* No results case */
+              <div className="col-12">
+                <div className="alert alert-info" role="alert">
+                  <strong>No recommendations found</strong> for "{song}" with {minMonthlyListeners} - {maxMonthlyListeners} monthly listeners. Try adjusting your search criteria.
                 </div>
               </div>
-            ))
+            )
           ) : rawData ? (
             /* Fallback for a single JSON object instead of an array */
             <div className="col-12 col-md-8 col-lg-6 mx-auto">
@@ -108,7 +189,7 @@ function App() {
                   {Object.entries(rawData).map(([key, value]) => (
                     <div className="mb-3" key={key}>
                       <small className="text-muted fw-bold text-uppercase d-block mb-1">
-                        {key.replace(/([A-Z])/g, ' $1')}
+                        {key.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
                       </small>
                       <p className="card-text text-dark">
                         {typeof value === 'object' ? JSON.stringify(value) : String(value)}
@@ -120,7 +201,6 @@ function App() {
             </div>
           ) : null}
         </div>
-      </section>
     </main>
   );
 }
